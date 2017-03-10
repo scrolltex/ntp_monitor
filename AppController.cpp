@@ -52,7 +52,7 @@ void AppController::UpdateStatus()
 #if defined(Q_OS_LINUX) || defined(DEBUG)
     QProcess process;
     process.setWorkingDirectory(qApp->applicationDirPath());
-    process.start("ntpq.exe -pn");
+    process.start("ntpq -pn");
     process.waitForFinished(5000);
 
     if(process.error() != QProcess::ProcessError::UnknownError)
