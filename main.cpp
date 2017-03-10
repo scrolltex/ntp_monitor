@@ -5,7 +5,7 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
 
-    AppController appc();
+    AppController appc;
     Q_UNUSED(appc);
 
     return app.exec();

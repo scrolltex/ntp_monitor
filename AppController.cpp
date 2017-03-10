@@ -1,16 +1,17 @@
 #include "AppController.hpp"
 
-AppController::AppController(QObject *parent) : QObject(parent)
+AppController::AppController(QObject *parent) : QObject(parent), component(&engine),
+                                                timeUpdate(this), statusUpdate(this)
 {
     // Init qml engine
-    component = new QQmlComponent(&engine, QUrl(QStringLiteral("qrc:/main.qml")));
-    if(!component->isReady())
+    component.loadUrl(QUrl(QStringLiteral("qrc:/main.qml")));
+    if(!component.isReady())
     {
-        qCritical() << component->errorString();
+        qCritical() << component.errorString();
         exit(-1);
     }
 
-    root = component->create();
+    root = component.create();
 
     // Find links to qml objects
     time = root->findChild<QObject*>("time");
@@ -18,17 +19,16 @@ AppController::AppController(QObject *parent) : QObject(parent)
     pps = root->findChild<QObject*>("pps");
     gps = root->findChild<QObject*>("gps");
 
+    // Connecting events
     connect(&engine, SIGNAL(quit()), qApp, SLOT(quit()));
     connect(root, SIGNAL(restart_ntp()), this, SLOT(RestartNTP()));
 
     // Init timers
-    timeUpdate = new QTimer(this);
-    connect(timeUpdate, SIGNAL(timeout()), this, SLOT(UpdateTime()));
-    timeUpdate->start(500);
+    connect(&timeUpdate, SIGNAL(timeout()), this, SLOT(UpdateTime()));
+    timeUpdate.start(250);
 
-    statusUpdate = new QTimer(this);
-    connect(statusUpdate, SIGNAL(timeout()), this, SLOT(UpdateStatus()));
-    statusUpdate->start(2000);
+    connect(&statusUpdate, SIGNAL(timeout()), this, SLOT(UpdateStatus()));
+    statusUpdate.start(2000);
 
     // First update call
     UpdateTime();
@@ -37,13 +37,8 @@ AppController::AppController(QObject *parent) : QObject(parent)
 
 AppController::~AppController()
 {
-    // Delete timers
-    delete timeUpdate;
-    delete statusUpdate;
-
     // Delete QML objects
     delete root;
-    delete component;
 }
 
 void AppController::UpdateTime()
@@ -54,43 +49,101 @@ void AppController::UpdateTime()
 
 void AppController::UpdateStatus()
 {
-#ifdef Q_OS_LINUX
+#if defined(Q_OS_LINUX) || defined(DEBUG)
     QProcess process;
-    QByteArray output;
+    process.setWorkingDirectory(qApp->applicationDirPath());
+    process.start("ntpq.exe -pn");
+    process.waitForFinished(5000);
+
+    if(process.error() != QProcess::ProcessError::UnknownError)
+    {
+        qWarning() << "ntpq start error: " << process.errorString();
+        time->setProperty("color", StatusColor::red);
+        pps->setProperty("color", StatusColor::red);
+        gps->setProperty("color", StatusColor::red);
+        return;
+    }
+
+    // reading output
+    QString err_output = process.readAllStandardError();
+    QString output = process.readAllStandardOutput();
+
+#ifdef Q_OS_WIN
+    // removing \r symbols
+    err_output.remove('\r');
+    output.remove('\r');
+#endif
+
+    if(output.isEmpty() || (output.isEmpty() && err_output.isEmpty()))
+    {
+        qWarning() << "ntpq output is empty!";
+        time->setProperty("color", StatusColor::red);
+        pps->setProperty("color", StatusColor::red);
+        gps->setProperty("color", StatusColor::red);
+        return;
+    }
+
+    if(err_output.contains("Connection refused") ||
+           output.contains("Connection refused"))
+    {
+        qWarning() << "ntpq error: connection refused";
+        time->setProperty("color", StatusColor::red);
+        pps->setProperty("color", StatusColor::red);
+        gps->setProperty("color", StatusColor::red);
+        return;
+    }
+
+    // Split ntpq output
+    QStringList lines = output.split('\n');
+    // Removing ntpq table header
+    lines.removeAll("     remote           refid      st t when poll reach   delay   offset  jitter");
+    lines.removeAll("==============================================================================");
+
+    // Custom grep
+    auto grep = [lines](QString tofind) -> QString {
+        foreach(QString str, lines)
+        {
+            if(str.contains(tofind))
+                return str;
+        }
+
+        return "";
+    };
+
+    QString grepped;
     QString status_color;
 
     // Time status
-    process.start("ntpq -pn | grep 127.127.22.0");
-    process.waitForFinished();
-    output = process.readAllStandardOutput();
-    if(output.isEmpty() || output.contains("refused"))
-        status_color = StatusColor::red;
-    else
+    grepped = grep("127.127.22.0");
+    if(!grepped.isEmpty())
     {
-        auto offset = abs(output.split(' ')[8].toFloat());
+        auto offset = abs(grepped.split(' ', QString::SkipEmptyParts)[8].toFloat());
         status_color = offset < 0.1 ? StatusColor::green : StatusColor::yellow;
     }
+    else
+        status_color = StatusColor::red;
 
     time->setProperty("color", status_color);
 
     // PPS status
-    if(output.isEmpty() || output.contains("refused"))
-        status_color = output.startsWith("o") ? StatusColor::green : StatusColor::yellow;
+    if(!grepped.isEmpty())
+        status_color = grepped.startsWith("o") ? StatusColor::green : StatusColor::yellow;
     else
         status_color = StatusColor::red;
 
+    pps->setProperty("color", status_color);
+
     // GPS status
-    process.start("ntpq -pn | grep 127.127.20.0");
-    process.waitForFinished();
-    output = process.readAllStandardOutput();
-    if(!output.isEmpty() && !output.contains("refused"))
+    grepped = grep("127.127.20.0");
+    if(!grepped.isEmpty())
     {
-        if(output.split(' ')[6] == "377")
+        if(grepped.split(' ', QString::SkipEmptyParts)[6] == "377")
             status_color = StatusColor::green;
         else
             status_color = StatusColor::yellow;
     }
-    else status_color = StatusColor::red;
+    else
+        status_color = StatusColor::red;
 
     gps->setProperty("color", status_color);
 #else
@@ -104,8 +157,7 @@ void AppController::RestartNTP()
 {
     qDebug() << "Restarting ntp service...";
 #ifdef Q_OS_LINUX
-    QProcess proc;
-    proc.start("sudo service ntp restart");
+    QProccess::exec("sudo service ntp restart");
 #else
     qWarning() << "Only works in linux!";
 #endif

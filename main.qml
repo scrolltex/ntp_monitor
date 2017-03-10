@@ -48,7 +48,6 @@ Window {
         font.pixelSize: 30
     }
 
-
     RowLayout {
         id: row
         y: 178
@@ -70,6 +69,7 @@ Window {
 
             Text {
                 id: pps_text
+                color: "#000000"
                 text: "PPS"
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter

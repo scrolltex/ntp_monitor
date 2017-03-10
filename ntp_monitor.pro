@@ -2,6 +2,7 @@ TEMPLATE = app
 
 QT += qml quick
 CONFIG += c++11
+CONFIG(debug, release|debug):DEFINES += DEBUG
 
 SOURCES += main.cpp \
     AppController.cpp

@@ -7,12 +7,13 @@
 #include <QQmlComponent>
 #include <QTimer>
 #include <QTime>
+#include <QDate>
 #include <QGuiApplication>
 #include <QProcess>
 
 namespace StatusColor {
     const QString green = "#05952d";
-    const QString yellow = "";
+    const QString yellow = "#ffd812";
     const QString red = "#b70808";
 }
 
@@ -25,7 +26,7 @@ public:
 
 private:
     QQmlEngine engine;
-    QQmlComponent *component;
+    QQmlComponent component;
     QObject* root;
 
     QObject* time;
@@ -33,8 +34,8 @@ private:
     QObject* pps;
     QObject* gps;
 
-    QTimer* timeUpdate;
-    QTimer* statusUpdate;
+    QTimer timeUpdate;
+    QTimer statusUpdate;
 
 signals:
 
