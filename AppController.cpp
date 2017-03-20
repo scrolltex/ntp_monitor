@@ -1,7 +1,7 @@
 #include "AppController.hpp"
 
 AppController::AppController(QObject *parent) : QObject(parent), component(&engine),
-                                                timeUpdate(this), statusUpdate(this)
+                                                statusUpdate(this)
 {
     // Init qml engine
     component.loadUrl(QUrl(QStringLiteral("qrc:/main.qml")));
@@ -13,9 +13,13 @@ AppController::AppController(QObject *parent) : QObject(parent), component(&engi
 
     root = component.create();
 
+#ifdef DEBUG
+    // Run in windowed mode when debug
+    QMetaObject::invokeMethod(root, "toggle_fullscreen");
+#endif
+
     // Find links to qml objects
     time = root->findChild<QObject*>("time");
-    date = root->findChild<QObject*>("date");
     pps = root->findChild<QObject*>("pps");
     gps = root->findChild<QObject*>("gps");
 
@@ -24,14 +28,10 @@ AppController::AppController(QObject *parent) : QObject(parent), component(&engi
     connect(root, SIGNAL(restart_ntp()), this, SLOT(RestartNTP()));
 
     // Init timers
-    connect(&timeUpdate, SIGNAL(timeout()), this, SLOT(UpdateTime()));
-    timeUpdate.start(250);
-
     connect(&statusUpdate, SIGNAL(timeout()), this, SLOT(UpdateStatus()));
     statusUpdate.start(2000);
 
     // First update call
-    UpdateTime();
     UpdateStatus();
 }
 
@@ -41,23 +41,18 @@ AppController::~AppController()
     delete root;
 }
 
-void AppController::UpdateTime()
-{
-    time->setProperty("text", QTime::currentTime().toString());
-    date->setProperty("text", QDate::currentDate().toString("dd.MM.yyyy"));
-}
-
 void AppController::UpdateStatus()
 {
-#if defined(Q_OS_LINUX) || defined(DEBUG)
-    QProcess process;
-    process.setWorkingDirectory(qApp->applicationDirPath());
-    process.start("ntpq -pn");
-    process.waitForFinished(5000);
+    QString output;
 
-    if(process.error() != QProcess::ProcessError::UnknownError)
+#if defined(Q_OS_LINUX) && !defined(DEBUG)
+    QProcess process;
+    process.start("ntpq -pn");
+
+    if(!process.waitForFinished(5000))
     {
         qWarning() << "ntpq start error: " << process.errorString();
+
         time->setProperty("color", StatusColor::red);
         pps->setProperty("color", StatusColor::red);
         gps->setProperty("color", StatusColor::red);
@@ -65,28 +60,30 @@ void AppController::UpdateStatus()
     }
 
     // reading output
-    QString err_output = process.readAllStandardError();
-    QString output = process.readAllStandardOutput();
-
-#ifdef Q_OS_WIN
-    // removing \r symbols
-    err_output.remove('\r');
-    output.remove('\r');
+    output = process.readAll();
+#else
+    QFile file(qApp->applicationDirPath() + "/ntpq_output.txt");
+    if(file.exists() && file.open(QIODevice::ReadOnly))
+    {
+        output = file.readAll();
+        file.close();
+    }
 #endif
 
-    if(output.isEmpty() || (output.isEmpty() && err_output.isEmpty()))
+    if(output.isEmpty())
     {
         qWarning() << "ntpq output is empty!";
+
         time->setProperty("color", StatusColor::red);
         pps->setProperty("color", StatusColor::red);
         gps->setProperty("color", StatusColor::red);
         return;
     }
 
-    if(err_output.contains("Connection refused") ||
-           output.contains("Connection refused"))
+    if(output.contains("Connection refused"))
     {
         qWarning() << "ntpq error: connection refused";
+
         time->setProperty("color", StatusColor::red);
         pps->setProperty("color", StatusColor::red);
         gps->setProperty("color", StatusColor::red);
@@ -96,11 +93,11 @@ void AppController::UpdateStatus()
     // Split ntpq output
     QStringList lines = output.split('\n');
     // Removing ntpq table header
-    lines.removeAll("     remote           refid      st t when poll reach   delay   offset  jitter");
-    lines.removeAll("==============================================================================");
+    lines.removeFirst(); //     remote           refid      st t when poll reach   delay   offset  jitter
+    lines.removeFirst(); //==============================================================================
 
     // Custom grep
-    auto grep = [lines](QString tofind) -> QString {
+    auto get_line = [lines](QString tofind) -> QString {
         foreach(QString str, lines)
         {
             if(str.contains(tofind))
@@ -110,14 +107,14 @@ void AppController::UpdateStatus()
         return "";
     };
 
-    QString grepped;
+    QString status;
     QString status_color;
 
     // Time status
-    grepped = grep("127.127.22.0");
-    if(!grepped.isEmpty())
+    status = get_line("127.127.22.0");
+    if(!status.isEmpty())
     {
-        auto offset = abs(grepped.split(' ', QString::SkipEmptyParts)[8].toFloat());
+        float offset = abs(status.split(' ', QString::SkipEmptyParts)[8].toFloat());
         status_color = offset < 0.1 ? StatusColor::green : StatusColor::yellow;
     }
     else
@@ -126,18 +123,18 @@ void AppController::UpdateStatus()
     time->setProperty("color", status_color);
 
     // PPS status
-    if(!grepped.isEmpty())
-        status_color = grepped.startsWith("o") ? StatusColor::green : StatusColor::yellow;
+    if(!status.isEmpty())
+        status_color = status.startsWith("o") ? StatusColor::green : StatusColor::yellow;
     else
         status_color = StatusColor::red;
 
     pps->setProperty("color", status_color);
 
     // GPS status
-    grepped = grep("127.127.20.0");
-    if(!grepped.isEmpty())
+    status = get_line("127.127.20.0");
+    if(!status.isEmpty())
     {
-        if(grepped.split(' ', QString::SkipEmptyParts)[6] == "377")
+        if(status.split(' ', QString::SkipEmptyParts)[6] == "377")
             status_color = StatusColor::green;
         else
             status_color = StatusColor::yellow;
@@ -146,19 +143,13 @@ void AppController::UpdateStatus()
         status_color = StatusColor::red;
 
     gps->setProperty("color", status_color);
-#else
-    time->setProperty("color", StatusColor::red);
-    pps->setProperty("color", StatusColor::red);
-    gps->setProperty("color", StatusColor::red);
-#endif
 }
 
 void AppController::RestartNTP()
 {
-    qDebug() << "Restarting ntp service...";
-#ifdef Q_OS_LINUX
-    QProccess::exec("sudo service ntp restart");
+#if defined(Q_OS_LINUX) && !defined(DEBUG)
+    QProcess::execute("service ntp restart");
 #else
-    qWarning() << "Only works in linux!";
+    qDebug() << "RST pressed";
 #endif
 }

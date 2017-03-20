@@ -13,39 +13,63 @@ Window {
 
     signal restart_ntp()
 
+    function toggle_fullscreen()
+    {
+        if(window.visibility == Window.FullScreen)
+        {
+            window.visibility = Window.Windowed
+            cursor.cursorShape = Qt.ArrowCursor
+        }
+        else
+        {
+            window.visibility = Window.FullScreen
+            cursor.cursorShape = Qt.BlankCursor
+        }
+    }
+
     Item {
         focus: true
         Keys.onPressed: {
             switch(event.key)
             {
                 case Qt.Key_Escape: Qt.quit(); break;
-                case Qt.Key_F11: window.visibility = window.visibility == Window.FullScreen ? Window.Windowed : Window.FullScreen; break;
+                case Qt.Key_F11: toggle_fullscreen(); break;
             }
+        }
+    }
+
+    Timer {
+        interval: 250
+        running: true
+        repeat: true
+        onTriggered: {
+            var now = new Date();
+            time.text = Qt.formatDateTime(now, "HH:mm:ss");
+            date.text = Qt.formatDateTime(now, "dd.MM.yyyy");
         }
     }
 
     Text {
         id: time
         objectName: "time"
-        y: 15
         color: "#05952d"
         text: "00:00:00"
+        font.pixelSize: 60
+        y: 15
         anchors.horizontalCenter: parent.horizontalCenter
         verticalAlignment: Text.AlignTop
         horizontalAlignment: Text.AlignHCenter
-        font.pixelSize: 60
     }
 
     Text {
         id: date
-        objectName: "date"
-        y: 93
         color: "#ffffff"
-        text: "27 Jan 2000"
+        text: "01.01.2000"
+        font.pixelSize: 30
+        y: 93
         anchors.horizontalCenterOffset: 0
         anchors.horizontalCenter: parent.horizontalCenter
         horizontalAlignment: Text.AlignHCenter
-        font.pixelSize: 30
     }
 
     RowLayout {
@@ -118,5 +142,12 @@ Window {
                 onClicked: restart_ntp()
             }
         }
+    }
+
+    MouseArea {
+        id: cursor
+        anchors.fill: parent
+        enabled: false
+        cursorShape: Qt.BlankCursor
     }
 }
