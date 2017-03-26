@@ -9,7 +9,7 @@
 #include <QProcess>
 #include <QDebug>
 
-#ifdef DEBUG
+#if !defined(Q_OS_LINUX) || defined(DEBUG)
 #include <QFile>
 #endif
 
