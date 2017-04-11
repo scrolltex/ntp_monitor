@@ -36,6 +36,27 @@ private:
     QObject* gps;
 
     QTimer statusUpdate;
+    float offset = 0;
+    int sync_bits = 0;
+    char pps_key = ' ';
+
+    enum SyncVar
+    {
+        Time,
+        PPS,
+        GPS
+    };
+
+    enum SyncVarStatus
+    {
+        Undefined,
+        Successfull,
+        Warning,
+        Error
+    };
+
+    QString SyncVarToString(SyncVar var);
+    void ReportSyncStatus(SyncVar var, SyncVarStatus status);
 
 signals:
 

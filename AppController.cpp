@@ -7,7 +7,7 @@ AppController::AppController(QObject *parent) : QObject(parent), component(&engi
     component.loadUrl(QUrl(QStringLiteral("qrc:/main.qml")));
     if(!component.isReady())
     {
-        qCritical() << component.errorString();
+        qFatal(qUtf8Printable(component.errorString()));
         exit(-1);
     }
 
@@ -31,6 +31,8 @@ AppController::AppController(QObject *parent) : QObject(parent), component(&engi
     connect(&statusUpdate, SIGNAL(timeout()), this, SLOT(UpdateStatus()));
     statusUpdate.start(2000);
 
+    qInfo("NTP monitor started");
+
     // First update call
     UpdateStatus();
 }
@@ -39,6 +41,51 @@ AppController::~AppController()
 {
     // Delete QML objects
     delete root;
+}
+
+QString AppController::SyncVarToString(SyncVar var)
+{
+    switch(var)
+    {
+        case SyncVar::Time: return "Time";
+        case SyncVar::PPS: return "PPS";
+        case SyncVar::GPS: return "GPS";
+        default: return "Unknown";
+    }
+}
+
+void AppController::ReportSyncStatus(SyncVar var, SyncVarStatus status)
+{
+    static SyncVarStatus last_time = SyncVarStatus::Undefined;
+    static SyncVarStatus last_pps = SyncVarStatus::Undefined;
+    static SyncVarStatus last_gps = SyncVarStatus::Undefined;
+
+    if((var == SyncVar::Time && status != last_time) ||
+       (var == SyncVar::PPS && status != last_pps) ||
+       (var == SyncVar::GPS && status != last_gps))
+    {
+        if(status == SyncVarStatus::Successfull)
+            qInfo("%s: sync complete.", qUtf8Printable(SyncVarToString(var)));
+        else if(status == SyncVarStatus::Error)
+            qCritical("%s: sync failed.", qUtf8Printable(SyncVarToString(var)));
+        else
+        {
+            if(var == SyncVar::Time)
+                qWarning("Time: large offset (%4.3f)", offset);
+            else if(var == SyncVar::PPS)
+                qWarning("PPS: not used. Key is '%c'", pps_key);
+            else if(var == SyncVar::GPS)
+                qWarning("GPS: Error in one of the attempts (%s; %s)", qUtf8Printable(QString::number(sync_bits, 8)), qUtf8Printable(QString::number(sync_bits, 2)));
+        }
+    }
+
+    switch(var)
+    {
+        case SyncVar::Time: last_time = status; break;
+        case SyncVar::PPS: last_pps = status; break;
+        case SyncVar::GPS: last_gps = status; break;
+        default: break;
+    }
 }
 
 void AppController::UpdateStatus()
@@ -51,7 +98,7 @@ void AppController::UpdateStatus()
 
     if(!process.waitForFinished(5000))
     {
-        qWarning() << "ntpq start error: " << process.errorString();
+        qCritical() << "ntpq start error: " << process.errorString();
 
         time->setProperty("color", StatusColor::red);
         pps->setProperty("color", StatusColor::red);
@@ -72,7 +119,7 @@ void AppController::UpdateStatus()
 
     if(output.isEmpty())
     {
-        qWarning() << "ntpq output is empty!";
+        qCritical() << "ntpq output is empty!";
 
         time->setProperty("color", StatusColor::red);
         pps->setProperty("color", StatusColor::red);
@@ -82,7 +129,7 @@ void AppController::UpdateStatus()
 
     if(output.contains("Connection refused"))
     {
-        qWarning() << "ntpq error: connection refused";
+        qCritical() << "ntpq error: connection refused";
 
         time->setProperty("color", StatusColor::red);
         pps->setProperty("color", StatusColor::red);
@@ -114,19 +161,31 @@ void AppController::UpdateStatus()
     status = get_line("127.127.22.0");
     if(!status.isEmpty())
     {
-        float offset = abs(status.split(' ', QString::SkipEmptyParts)[8].toFloat());
-        status_color = offset < 0.1 ? StatusColor::green : StatusColor::yellow;
+        offset = qAbs(status.split(' ', QString::SkipEmptyParts)[8].toFloat());
+        bool ok = offset < 0.1;
+        status_color = ok ? StatusColor::green : StatusColor::yellow;
+        ReportSyncStatus(SyncVar::Time, ok ? SyncVarStatus::Successfull : SyncVarStatus::Warning);
     }
     else
+    {
         status_color = StatusColor::red;
-
+        ReportSyncStatus(SyncVar::Time, SyncVarStatus::Error);
+    }
     time->setProperty("color", status_color);
 
     // PPS status
     if(!status.isEmpty())
-        status_color = status.startsWith("o") ? StatusColor::green : StatusColor::yellow;
+    {
+        pps_key = status[0].toLatin1();
+        bool ok = status.startsWith("o");
+        status_color = ok ? StatusColor::green : StatusColor::yellow;
+        ReportSyncStatus(SyncVar::PPS, ok ? SyncVarStatus::Successfull : SyncVarStatus::Warning);
+    }
     else
+    {
         status_color = StatusColor::red;
+        ReportSyncStatus(SyncVar::PPS, SyncVarStatus::Error);
+    }
 
     pps->setProperty("color", status_color);
 
@@ -134,13 +193,17 @@ void AppController::UpdateStatus()
     status = get_line("127.127.20.0");
     if(!status.isEmpty())
     {
-        if(status.split(' ', QString::SkipEmptyParts)[6] == "377")
-            status_color = StatusColor::green;
-        else
-            status_color = StatusColor::yellow;
+        bool ok = false;
+        sync_bits = status.split(' ', QString::SkipEmptyParts)[6].toInt(&ok, 8);
+        ok = sync_bits == 255;
+        status_color = ok ? StatusColor::green : StatusColor::yellow;
+        ReportSyncStatus(SyncVar::GPS, ok ? SyncVarStatus::Successfull : SyncVarStatus::Warning);
     }
     else
+    {
         status_color = StatusColor::red;
+        ReportSyncStatus(SyncVar::GPS, SyncVarStatus::Error);
+    }
 
     gps->setProperty("color", status_color);
 }
@@ -148,6 +211,7 @@ void AppController::UpdateStatus()
 void AppController::RestartNTP()
 {
 #if defined(Q_OS_LINUX) && !defined(DEBUG)
+    qInfo() << "Restarting ntp service";
     QProcess::execute("service ntp restart");
 #else
     qDebug() << "RST pressed";

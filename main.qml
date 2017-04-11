@@ -42,6 +42,8 @@ Window {
         interval: 250
         running: true
         repeat: true
+        triggeredOnStart: true
+
         onTriggered: {
             var now = new Date();
             time.text = Qt.formatDateTime(now, "HH:mm:ss");
