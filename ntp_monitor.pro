@@ -1,16 +1,14 @@
 TEMPLATE = app
 
-QT += qml quick
+QT += core gui widgets
 CONFIG += c++11
 CONFIG(debug, release|debug):DEFINES += DEBUG
 
 SOURCES += main.cpp \
-    AppController.cpp
+    MainWindow.cpp
 
 HEADERS += \
-    AppController.hpp
-
-RESOURCES += qml.qrc
+    MainWindow.hpp
 
 # The following define makes your compiler emit warnings if you use
 # any feature of Qt which as been marked deprecated (the exact warnings
@@ -19,5 +17,5 @@ RESOURCES += qml.qrc
 DEFINES += QT_DEPRECATED_WARNINGS
 
 # Default rules for deployment.
-unix:!android: target.path = /opt/$${TARGET}/bin
+unix:!android: target.path = /opt/$${TARGET}
 !isEmpty(target.path): INSTALLS += target

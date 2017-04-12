@@ -1,9 +1,10 @@
-#include <QGuiApplication>
 #include <iostream>
+#include <QApplication>
 #include <QFile>
 #include <QDateTime>
+#include <QTextStream>
 
-#include "AppController.hpp"
+#include "MainWindow.hpp"
 
 QString MsgTypeToStr(QtMsgType type)
 {
@@ -48,11 +49,18 @@ void CustomMessageHandler(QtMsgType type, const QMessageLogContext &context, con
 
 int main(int argc, char *argv[])
 {
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
     qInstallMessageHandler(CustomMessageHandler);
 
-    AppController appc;
-    Q_UNUSED(appc);
+    QApplication::setApplicationName("NTP Monitor");
+    QApplication::setApplicationVersion("1.1");
+
+#ifndef DEBUG
+    QApplication::setOverrideCursor(Qt::BlankCursor);
+#endif
+
+    MainWindow wnd;
+    wnd.show();
 
     return app.exec();
 }

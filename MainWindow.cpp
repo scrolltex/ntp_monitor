@@ -1,49 +1,88 @@
-#include "AppController.hpp"
+#include "MainWindow.hpp"
 
-AppController::AppController(QObject *parent) : QObject(parent), component(&engine),
-                                                statusUpdate(this)
+MainWindow::MainWindow(QWidget *parent) : QWidget(parent), dateTimeUpdate(this), statusUpdate(this)
 {
-    // Init qml engine
-    component.loadUrl(QUrl(QStringLiteral("qrc:/main.qml")));
-    if(!component.isReady())
-    {
-        qFatal(qUtf8Printable(component.errorString()));
-        exit(-1);
-    }
+    // Init gui
+    CreateGUI();
+    setWindowTitle("ntp monitor");
+    resize(320, 240);
 
-    root = component.create();
-
-#ifdef DEBUG
-    // Run in windowed mode when debug
-    QMetaObject::invokeMethod(root, "toggle_fullscreen");
+#ifndef DEBUG
+    this->showFullScreen();
 #endif
 
-    // Find links to qml objects
-    time = root->findChild<QObject*>("time");
-    pps = root->findChild<QObject*>("pps");
-    gps = root->findChild<QObject*>("gps");
+    // Connecting timers
+    connect(&dateTimeUpdate, SIGNAL(timeout()), this, SLOT(UpdateDateTime()));
+    dateTimeUpdate.start(250);
 
-    // Connecting events
-    connect(&engine, SIGNAL(quit()), qApp, SLOT(quit()));
-    connect(root, SIGNAL(restart_ntp()), this, SLOT(RestartNTP()));
-
-    // Init timers
     connect(&statusUpdate, SIGNAL(timeout()), this, SLOT(UpdateStatus()));
     statusUpdate.start(2000);
 
     qInfo("NTP monitor started");
 
-    // First update call
+    // First update
+    UpdateDateTime();
     UpdateStatus();
 }
 
-AppController::~AppController()
+MainWindow::~MainWindow()
 {
-    // Delete QML objects
-    delete root;
+
 }
 
-QString AppController::SyncVarToString(SyncVar var)
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if(event->key() == Qt::Key_Escape)
+        this->close();
+}
+
+void MainWindow::UpdateButtonColor(QWidget* widget, QString color)
+{
+    const QString style = QString("color: #000000; "
+                          "background-color: %1; "
+                          "border: 1px solid; "
+                          "border-radius: 2px; "
+                          "font-size: 45px; ").arg(color);
+    widget->setStyleSheet(style);
+}
+
+void MainWindow::CreateGUI()
+{
+    this->setStyleSheet("background-color: #000000");
+
+    time = new QLabel("00:00:00");
+    time->setFont(QFont("Arial", 45));
+    time->setStyleSheet("color: #ffffff;");
+
+    date = new QLabel("00.00.0000");
+    date->setFont(QFont("Arial", 30));
+    date->setStyleSheet("color: #ffffff;");
+
+    v_layout = new QVBoxLayout();
+    v_layout->addWidget(time, 0, Qt::AlignHCenter);
+    v_layout->addWidget(date, 0, Qt::AlignHCenter);
+
+    pps_button = new QPushButton("PPS");
+    UpdateButtonColor(pps_button);
+
+    gps_button = new QPushButton("GPS");
+    UpdateButtonColor(gps_button);
+
+    rst_button = new QPushButton("RST");
+    rst_button->setFocus();
+    UpdateButtonColor(rst_button);
+    connect(rst_button, SIGNAL(pressed()), this, SLOT(RestartNTP()));
+
+    h_layout = new QHBoxLayout();
+    h_layout->addWidget(pps_button);
+    h_layout->addWidget(gps_button);
+    h_layout->addWidget(rst_button);
+
+    v_layout->addLayout(h_layout);
+    setLayout(v_layout);
+}
+
+QString MainWindow::SyncVarToString(SyncVar var)
 {
     switch(var)
     {
@@ -54,7 +93,7 @@ QString AppController::SyncVarToString(SyncVar var)
     }
 }
 
-void AppController::ReportSyncStatus(SyncVar var, SyncVarStatus status)
+void MainWindow::ReportSyncStatus(SyncVar var, SyncVarStatus status)
 {
     static SyncVarStatus last_time = SyncVarStatus::Undefined;
     static SyncVarStatus last_pps = SyncVarStatus::Undefined;
@@ -88,7 +127,14 @@ void AppController::ReportSyncStatus(SyncVar var, SyncVarStatus status)
     }
 }
 
-void AppController::UpdateStatus()
+void MainWindow::UpdateDateTime()
+{
+    auto now = QDateTime::currentDateTime();
+    time->setText(now.toString("HH:mm:ss"));
+    date->setText(now.toString("dd.MM.yyyy"));
+}
+
+void MainWindow::UpdateStatus()
 {
     QString output;
 
@@ -100,9 +146,9 @@ void AppController::UpdateStatus()
     {
         qCritical() << "ntpq start error: " << process.errorString();
 
-        time->setProperty("color", StatusColor::red);
-        pps->setProperty("color", StatusColor::red);
-        gps->setProperty("color", StatusColor::red);
+        time->setStyleSheet(QString("color : %1;").arg(StatusColor::red));
+        UpdateButtonColor(pps_button, StatusColor::red);
+        UpdateButtonColor(gps_button, StatusColor::red);
         return;
     }
 
@@ -121,9 +167,9 @@ void AppController::UpdateStatus()
     {
         qCritical() << "ntpq output is empty!";
 
-        time->setProperty("color", StatusColor::red);
-        pps->setProperty("color", StatusColor::red);
-        gps->setProperty("color", StatusColor::red);
+        time->setStyleSheet(QString("color : %1;").arg(StatusColor::red));
+        UpdateButtonColor(pps_button, StatusColor::red);
+        UpdateButtonColor(gps_button, StatusColor::red);
         return;
     }
 
@@ -131,9 +177,9 @@ void AppController::UpdateStatus()
     {
         qCritical() << "ntpq error: connection refused";
 
-        time->setProperty("color", StatusColor::red);
-        pps->setProperty("color", StatusColor::red);
-        gps->setProperty("color", StatusColor::red);
+        time->setStyleSheet(QString("color : %1;").arg(StatusColor::red));
+        UpdateButtonColor(pps_button, StatusColor::red);
+        UpdateButtonColor(gps_button, StatusColor::red);
         return;
     }
 
@@ -171,7 +217,8 @@ void AppController::UpdateStatus()
         status_color = StatusColor::red;
         ReportSyncStatus(SyncVar::Time, SyncVarStatus::Error);
     }
-    time->setProperty("color", status_color);
+
+    time->setStyleSheet(QString("color : %1;").arg(status_color));
 
     // PPS status
     if(!status.isEmpty())
@@ -187,7 +234,7 @@ void AppController::UpdateStatus()
         ReportSyncStatus(SyncVar::PPS, SyncVarStatus::Error);
     }
 
-    pps->setProperty("color", status_color);
+    UpdateButtonColor(pps_button, status_color);
 
     // GPS status
     status = get_line("127.127.20.0");
@@ -205,10 +252,10 @@ void AppController::UpdateStatus()
         ReportSyncStatus(SyncVar::GPS, SyncVarStatus::Error);
     }
 
-    gps->setProperty("color", status_color);
+    UpdateButtonColor(gps_button, status_color);
 }
 
-void AppController::RestartNTP()
+void MainWindow::RestartNTP()
 {
 #if defined(Q_OS_LINUX) && !defined(DEBUG)
     qInfo() << "Restarting ntp service";
